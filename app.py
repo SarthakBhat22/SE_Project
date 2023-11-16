@@ -1,43 +1,65 @@
 import streamlit as st
 import pickle
 import requests
-from pathlib import Path
-
-import streamlit_authenticator as stauth
-
-
-names = ["User1", "Admin"]
-usernames = ["user1", "admin"]
-
-file_path = Path(__file__).parent / "hashed.pkl"
-with file_path.open("rb") as file:
-    hashed_passwords = pickle.load(file)
-
-credentials = {
-        "usernames":{
-            usernames[0]:{
-                "name":names[0],
-                "password":hashed_passwords[0]
-                },
-            usernames[1]:{
-                "name":names[1],
-                "password":hashed_passwords[1]
-                }            
-            }
-        }
-
-auth = stauth.Authenticate(credentials, "Movie_recommendation", "abcdef", 10)
-
-name, auth_status, username = auth.login("Login", "main")
-
-if auth_status == False:
-    st.error("Username/Password is incorrect")
-if auth_status == None:
-    st.error("Please enter Username and Password")
+import hashlib
+import mysql.connector
 
 
-if auth_status:
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# Function to create a MySQL database connection
+def create_connection():
+    conn = mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="xxxxxx",
+        database="Project"
+    )
+    cursor = conn.cursor()
+    return conn, cursor
+
+# Function to initialize the user table
+def init_user_table(cursor):
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS User (
+            UserID INT AUTO_INCREMENT PRIMARY KEY,
+            Username VARCHAR(50) NOT NULL UNIQUE,
+            Password VARCHAR(255) NOT NULL
+        )
+    """)
+    conn.commit()
+
+# Function to check login credentials
+def check_login(username, hashed_password):
+    cursor.execute("SELECT * FROM User WHERE Username = %s AND Password = %s", (username, hashed_password))
+    user = cursor.fetchone()
+    return user
+
+# Function to get user ID based on username
+def get_user_id(username):
+    cursor.execute("SELECT UserID FROM User WHERE Username = %s", (username,))
+    user_id = cursor.fetchone()
+    return user_id[0] if user_id else None
+
+# Function to register a new user
+def register_user(username, password):
+    hashed_password = hash_password(password)
+    cursor.execute("INSERT INTO User (Username, Password) VALUES (%s, %s)", (username, hashed_password))
+    conn.commit()
+
+# Create or connect to the MySQL database
+conn, cursor = create_connection()
+
+# Initialize the User table
+init_user_table(cursor)
+
+
+
+
+if st.session_state.get('logged_in', False):
+    # Rest of your code for movie recommendation system
     def fetch_poster(movie_id):
         url = "https://api.themoviedb.org/3/movie/{}?api_key=c7ec19ffdd3279641fb606d19ceb9bb1&language=en-US".format(movie_id)
         data=requests.get(url)
@@ -107,4 +129,52 @@ if auth_status:
             st.text(movie_name[4])
             st.image(movie_poster[4])
 
-    auth.logout("Logout", "main")
+    if st.button("Logout"):
+        st.session_state.logged_in = False
+
+    # User registration section
+else:
+    st.subheader('Login or Sign Up')
+    st.subheader('Select Action')
+    login_or_signup = st.radio("Choose an option:", ("Login", "Sign Up"))
+
+    # Sign Up Section
+    if login_or_signup == "Sign Up":
+        st.subheader('Sign Up')
+        new_username = st.text_input('Username')
+        new_password = st.text_input('Password', type='password')
+
+        if st.button('Sign Up'):
+            if new_username and new_password:
+                # Check if the username is already taken
+                cursor.execute("SELECT * FROM User WHERE Username = %s", (new_username,))
+                existing_user = cursor.fetchone()
+
+                if existing_user:
+                    st.error('Username already taken. Please choose a different one.')
+                else:
+                    # Insert new user into UserDB
+                    register_user(new_username, new_password)
+                    st.success('Sign Up successful! You can now log in.')
+            else:
+                st.error('Please fill in all the fields for Sign Up.')
+
+    # Login Section
+    if login_or_signup == "Login":
+        st.subheader('Login')
+        username = st.text_input('Username')
+        password = st.text_input('Password', type='password')
+
+        if st.button('Login'):
+            if username and password:
+                user = check_login(username, password)
+
+                if user:
+                    st.success('Login successful!')
+                    st.session_state.logged_in = True
+                    st.session_state.user_id = get_user_id(username)  # Fetch user_id based on the username
+                else:
+                    st.error('Invalid username or password')
+
+# Close the database connection
+conn.close()
