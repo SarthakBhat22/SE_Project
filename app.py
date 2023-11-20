@@ -32,8 +32,9 @@ def init_user_table(cursor):
     conn.commit()
 
 # Function to check login credentials
-def check_login(username, hashed_password):
-    cursor.execute("SELECT * FROM User WHERE Username = %s AND Password = %s", (username, hashed_password))
+def check_login(username, password):
+    hash_pass = hash_password(password)
+    cursor.execute("SELECT * FROM User WHERE Username = %s AND Password = %s", (username, hash_pass))
     user = cursor.fetchone()
     return user
 
